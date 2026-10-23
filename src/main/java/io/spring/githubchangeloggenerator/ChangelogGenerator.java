@@ -32,6 +32,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
 import org.springframework.util.StringUtils;
@@ -62,6 +64,8 @@ import io.spring.githubchangeloggenerator.github.service.Repository;
  */
 @Component
 public class ChangelogGenerator {
+
+	private static final Logger logger = LoggerFactory.getLogger(ChangelogGenerator.class);
 
 	private static final Comparator<Issue> TITLE_COMPARATOR = Comparator.comparing(Issue::getTitle,
 			String.CASE_INSENSITIVE_ORDER);
@@ -203,7 +207,11 @@ public class ChangelogGenerator {
 			return Stream.of(issue.getUser());
 		}
 		if (this.includeClosingContributors) {
-			return getClosingContributors(issue).stream();
+			Set<User> contributors = getClosingContributors(issue);
+			if (contributors.isEmpty() && isIncludedContributor(issue.getUser())) {
+				logger.warn("No contributor found for issue #{}: {}", issue.getNumber(), issue.getUrl());
+			}
+			return contributors.stream();
 		}
 		return Stream.empty();
 	}
@@ -281,6 +289,9 @@ public class ChangelogGenerator {
 	}
 
 	private boolean isIncludedContributor(User user) {
+		if (user == null || !StringUtils.hasText(user.getName())) {
+			return false;
+		}
 		String name = user.getName();
 		return !this.excludeContributors.contains(name) && !name.endsWith("[bot]");
 	}
