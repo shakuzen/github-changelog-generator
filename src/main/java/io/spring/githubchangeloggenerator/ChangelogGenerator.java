@@ -23,18 +23,25 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
+import org.springframework.util.StringUtils;
 
 import io.spring.githubchangeloggenerator.ApplicationProperties.ExternalLink;
 import io.spring.githubchangeloggenerator.ApplicationProperties.IssueSort;
+import io.spring.githubchangeloggenerator.github.payload.Commit;
+import io.spring.githubchangeloggenerator.github.payload.Commit.GitCommit;
 import io.spring.githubchangeloggenerator.github.payload.Issue;
+import io.spring.githubchangeloggenerator.github.payload.IssueEvent;
 import io.spring.githubchangeloggenerator.github.payload.Label;
 import io.spring.githubchangeloggenerator.github.payload.User;
 import io.spring.githubchangeloggenerator.github.service.GitHubService;
@@ -47,12 +54,16 @@ import io.spring.githubchangeloggenerator.github.service.Repository;
  * @author Madhura Bhave
  * @author Phillip Webb
  * @author Mahendra Bishnoi
+ * @author Tommy Ludwig
  */
 @Component
 public class ChangelogGenerator {
 
 	private static final Comparator<Issue> TITLE_COMPARATOR = Comparator.comparing(Issue::getTitle,
 			String.CASE_INSENSITIVE_ORDER);
+
+	private static final Pattern CO_AUTHORED_BY_PATTERN = Pattern
+		.compile("(?im)^co-authored-by:\\s*.*?<(?:\\d+\\+)?([^@>]+)@users\\.noreply\\.github\\.com>");
 
 	private static final List<Escape> escapes = Arrays.asList(gitHubUserMentions(), htmlTags(), markdownStyling());
 
@@ -70,6 +81,8 @@ public class ChangelogGenerator {
 
 	private final String contributorsTitle;
 
+	private final boolean includeClosingCommitAuthors;
+
 	private final ChangelogSections sections;
 
 	private final List<ExternalLink> externalLinks;
@@ -86,6 +99,7 @@ public class ChangelogGenerator {
 		this.excludeLabels = properties.getIssues().getExcludes().getLabels();
 		this.excludeContributors = properties.getContributors().getExclude().getNames();
 		this.contributorsTitle = properties.getContributors().getTitle();
+		this.includeClosingCommitAuthors = properties.getContributors().isIncludeClosingCommitAuthors();
 		this.externalLinks = properties.getExternalLinks();
 		this.generateLinks = properties.getIssues().isGenerateLinks();
 		this.issueChain = new PortedIssueChain(properties.getIssues().getPorts(), this.service, this.repository);
@@ -175,10 +189,60 @@ public class ChangelogGenerator {
 		}
 		return issues.stream()
 			.map(this::getPortedReferenceIssue)
-			.filter((issue) -> issue.getPullRequest() != null)
-			.map(Issue::getUser)
+			.flatMap(this::getContributorsForIssue)
 			.filter(this::isIncludedContributor)
 			.collect(Collectors.toSet());
+	}
+
+	private Stream<User> getContributorsForIssue(Issue issue) {
+		if (issue.getPullRequest() != null) {
+			return Stream.of(issue.getUser());
+		}
+		if (this.includeClosingCommitAuthors) {
+			return getClosingCommitAuthors(issue).stream();
+		}
+		return Stream.empty();
+	}
+
+	private Set<User> getClosingCommitAuthors(Issue issue) {
+		String commitId = getClosingCommitId(issue);
+		if (commitId == null) {
+			return Collections.emptySet();
+		}
+		Commit commit = this.service.getCommit(commitId, this.repository);
+		if (commit == null) {
+			return Collections.emptySet();
+		}
+		Set<User> authors = new HashSet<>();
+		if (commit.getAuthor() != null) {
+			authors.add(commit.getAuthor());
+		}
+		authors.addAll(getCoAuthors(commit));
+		return authors;
+	}
+
+	private String getClosingCommitId(Issue issue) {
+		List<IssueEvent> events = this.service.getEventsForIssue(Integer.parseInt(issue.getNumber()), this.repository);
+		for (int i = events.size() - 1; i >= 0; i--) {
+			IssueEvent event = events.get(i);
+			if ("closed".equals(event.getEvent())) {
+				return event.getCommitId();
+			}
+		}
+		return null;
+	}
+
+	private Set<User> getCoAuthors(Commit commit) {
+		GitCommit gitCommit = commit.getGitCommit();
+		if (gitCommit == null || !StringUtils.hasText(gitCommit.getMessage())) {
+			return Collections.emptySet();
+		}
+		Set<User> coAuthors = new HashSet<>();
+		Matcher matcher = CO_AUTHORED_BY_PATTERN.matcher(gitCommit.getMessage());
+		while (matcher.find()) {
+			coAuthors.add(new User(matcher.group(1)));
+		}
+		return coAuthors;
 	}
 
 	private Issue getPortedReferenceIssue(Issue issue) {

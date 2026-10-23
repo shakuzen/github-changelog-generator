@@ -247,6 +247,20 @@ You can also use `*` if you want to drop the contributors section entirely.
 
 
 
+=== Including Closing Commit Authors as Contributors
+
+By default, the contributors section is populated only from pull requests included in the milestone.
+If your project puts issues in milestones rather than pull requests, you can configure the generator to inspect the commits that closed the milestone's issues and include their authors (as well as any `Co-authored-by` contributors with GitHub noreply addresses):
+
+[source,yaml]
+----
+changelog:
+  contributors:
+    include-closing-commit-authors: true
+----
+
+
+
 === Sorting Issues
 
 By default, issues are sorted by their "created" date.

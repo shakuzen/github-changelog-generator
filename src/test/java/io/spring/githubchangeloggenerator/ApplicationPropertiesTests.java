@@ -21,6 +21,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.ClassPathResource;
@@ -37,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * @author Phillip Webb
  * @author Steven Sheehy
+ * @author Tommy Ludwig
  */
 class ApplicationPropertiesTests {
 
@@ -66,10 +68,21 @@ class ApplicationPropertiesTests {
 		assertThat(properties.getIssues().getSort()).isEqualTo(IssueSort.TITLE);
 		assertThat(properties.getContributors().getTitle()).isEqualTo("Nice one!");
 		assertThat(properties.getContributors().getExclude().getNames()).containsExactly("philwebb");
+		assertThat(properties.getContributors().isIncludeClosingCommitAuthors()).isFalse();
 		assertThat(properties.getExternalLinks().get(0).getName()).isEqualTo("Release Notes 1");
 		assertThat(properties.getExternalLinks().get(0).getLocation()).isEqualTo("url1");
 		assertThat(properties.getExternalLinks().get(1).getName()).isEqualTo("Release Notes 2");
 		assertThat(properties.getExternalLinks().get(1).getLocation()).isEqualTo("url2");
+	}
+
+	@Test
+	void loadWhenIncludeClosingCommitAuthorsIsTrue() {
+		MapConfigurationPropertySource source = new MapConfigurationPropertySource();
+		source.put("changelog.repository", "testorg/testrepo");
+		source.put("changelog.contributors.include-closing-commit-authors", "true");
+		Binder binder = new Binder(source);
+		ApplicationProperties properties = binder.bind("changelog", ApplicationProperties.class).get();
+		assertThat(properties.getContributors().isIncludeClosingCommitAuthors()).isTrue();
 	}
 
 }

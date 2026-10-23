@@ -49,7 +49,10 @@ import io.spring.githubchangeloggenerator.ApplicationProperties.Summary;
 import io.spring.githubchangeloggenerator.ApplicationProperties.SummaryMode;
 import io.spring.githubchangeloggenerator.github.payload.Comment;
 import io.spring.githubchangeloggenerator.github.payload.Comment.AuthorAssociation;
+import io.spring.githubchangeloggenerator.github.payload.Commit;
+import io.spring.githubchangeloggenerator.github.payload.Commit.GitCommit;
 import io.spring.githubchangeloggenerator.github.payload.Issue;
+import io.spring.githubchangeloggenerator.github.payload.IssueEvent;
 import io.spring.githubchangeloggenerator.github.payload.Label;
 import io.spring.githubchangeloggenerator.github.payload.PullRequest;
 import io.spring.githubchangeloggenerator.github.payload.User;
@@ -68,6 +71,7 @@ import static org.mockito.Mockito.mock;
  * @author Mahendra Bishnoi
  * @author Gary Russell
  * @author Steven Sheehy
+ * @author Tommy Ludwig
  */
 class ChangelogGeneratorTests {
 
@@ -158,7 +162,8 @@ class ChangelogGeneratorTests {
 		issues.add(newPullRequest("Enhancement 2", "2", Type.ENHANCEMENT, "enhancement-2-url", contributor2));
 		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
 		ApplicationProperties properties = new ApplicationProperties(REPO, MilestoneReference.ID, null, null,
-				new Contributors(null, new ContributorsExclude(Collections.singleton("contributor1"))), null, false);
+				new Contributors(null, new ContributorsExclude(Collections.singleton("contributor1")), false), null,
+				false);
 		this.generator = new ChangelogGenerator(this.service, properties);
 		assertChangelog("23").hasContent(from("output-with-excluded-contributors"));
 	}
@@ -172,7 +177,7 @@ class ChangelogGeneratorTests {
 		issues.add(newPullRequest("Enhancement 2", "2", Type.ENHANCEMENT, "enhancement-2-url", contributor2));
 		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
 		ApplicationProperties properties = new ApplicationProperties(REPO, MilestoneReference.ID, null, null,
-				new Contributors(null, new ContributorsExclude(Collections.singleton("*"))), null, false);
+				new Contributors(null, new ContributorsExclude(Collections.singleton("*")), false), null, false);
 		this.generator = new ChangelogGenerator(this.service, properties);
 		assertChangelog("23").hasContent(from("output-with-all-contributors-excluded"));
 	}
@@ -428,7 +433,7 @@ class ChangelogGeneratorTests {
 		issues.add(newPullRequest("Bug 1", "1", Type.BUG, "bug-1-url", contributor1));
 		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
 		ApplicationProperties properties = new ApplicationProperties(REPO, MilestoneReference.ID, null, null,
-				new Contributors(":heart: Teamwork", null), null, false);
+				new Contributors(":heart: Teamwork", null, false), null, false);
 		this.generator = new ChangelogGenerator(this.service, properties);
 		assertChangelog("23").hasContent(from("output-with-custom-contributors-title"));
 	}
@@ -506,6 +511,71 @@ class ChangelogGeneratorTests {
 		issues.add(newPullRequest("PR 4", "4", Type.ENHANCEMENT, "pr-4-url", contributor1));
 		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
 		assertChangelog("23").hasContent(from("output-with-pull-requests-only"));
+	}
+
+	@Test
+	void generateWhenIncludeClosingCommitAuthorsEnabled() throws Exception {
+		User contributor1 = createUser("contributor1");
+		User contributor2 = createUser("contributor2");
+		List<Issue> issues = new ArrayList<>();
+		issues.add(newIssue("Enhancement 1", "2", "enhancement-1-url", Type.ENHANCEMENT));
+		issues.add(newIssue("Enhancement 2", "4", "enhancement-2-url", Type.ENHANCEMENT));
+		issues.add(newPullRequest("Enhancement 3", "5", Type.ENHANCEMENT, "enhancement-5-url", contributor1));
+		issues.add(newIssue("Enhancement 4", "6", "enhancement-6-url", Type.ENHANCEMENT));
+		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
+
+		IssueEvent event1 = new IssueEvent("closed", "commit-sha-2");
+		given(this.service.getEventsForIssue(2, REPO)).willReturn(Collections.singletonList(event1));
+		given(this.service.getCommit("commit-sha-2", REPO)).willReturn(new Commit(contributor2));
+
+		IssueEvent event2 = new IssueEvent("closed", null);
+		given(this.service.getEventsForIssue(4, REPO)).willReturn(Collections.singletonList(event2));
+
+		ApplicationProperties properties = new ApplicationProperties(REPO, MilestoneReference.ID, null, null,
+				new Contributors(null, null, true), null, false);
+		this.generator = new ChangelogGenerator(this.service, properties);
+		assertChangelog("23").hasContent(from("output-with-no-bugs"));
+	}
+
+	@Test
+	void generateWhenIncludeClosingCommitAuthorsWithCoAuthors() throws Exception {
+		User contributor1 = createUser("contributor1");
+		User contributor2 = createUser("contributor2");
+		User contributor3 = createUser("contributor3");
+		List<Issue> issues = new ArrayList<>();
+		issues.add(newIssue("Enhancement 1", "2", "enhancement-1-url", Type.ENHANCEMENT));
+		issues.add(newIssue("Enhancement 2", "4", "enhancement-2-url", Type.ENHANCEMENT));
+		issues.add(newPullRequest("Enhancement 3", "5", Type.ENHANCEMENT, "enhancement-5-url", contributor1));
+		issues.add(newPullRequest("Enhancement 4", "6", Type.ENHANCEMENT, "enhancement-6-url", contributor2));
+		issues.add(newPullRequest("Enhancement 5", "7", Type.ENHANCEMENT, "enhancement-7-url", contributor3));
+		issues.add(newIssue("Enhancement 6", "8", "enhancement-8-url", Type.ENHANCEMENT));
+		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
+
+		IssueEvent event = new IssueEvent("closed", "commit-sha-2");
+		given(this.service.getEventsForIssue(2, REPO)).willReturn(Collections.singletonList(event));
+		GitCommit gitCommit = new GitCommit(
+				"Add feature\n\nCo-authored-by: Contributor Four <12345+contributor4@users.noreply.github.com>");
+		given(this.service.getCommit("commit-sha-2", REPO)).willReturn(new Commit(contributor2, gitCommit));
+
+		given(this.service.getEventsForIssue(4, REPO)).willReturn(Collections.emptyList());
+
+		ApplicationProperties properties = new ApplicationProperties(REPO, MilestoneReference.ID, null, null,
+				new Contributors(null, null, true), null, false);
+		this.generator = new ChangelogGenerator(this.service, properties);
+		assertChangelog("23").hasContent(from("output-with-more-than-two-contributors"));
+	}
+
+	@Test
+	void generateWhenIncludeClosingCommitAuthorsDisabledByDefault() throws Exception {
+		User contributor1 = createUser("contributor1");
+		List<Issue> issues = new ArrayList<>();
+		issues.add(newIssue("Bug 1", "1", "bug-1-url", Type.BUG));
+		issues.add(newIssue("Enhancement 1", "2", "enhancement-1-url", Type.ENHANCEMENT));
+		issues.add(newIssue("Enhancement 2", "4", "enhancement-2-url", Type.ENHANCEMENT));
+		issues.add(newIssue("Bug 3", "3", "bug-3-url", Type.BUG));
+		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
+
+		assertChangelog("23").hasContent(from("output-with-no-prs"));
 	}
 
 	private void setupGenerator(MilestoneReference id) {
