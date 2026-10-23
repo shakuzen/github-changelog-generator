@@ -33,7 +33,10 @@ import java.util.stream.Collectors;
 import org.assertj.core.api.PathAssert;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.util.FileCopyUtils;
 
 import io.spring.githubchangeloggenerator.ApplicationProperties.Contributors;
@@ -73,6 +76,7 @@ import static org.mockito.Mockito.mock;
  * @author Steven Sheehy
  * @author Tommy Ludwig
  */
+@ExtendWith(OutputCaptureExtension.class)
 class ChangelogGeneratorTests {
 
 	private static final Repository REPO = Repository.of("org/name");
@@ -578,6 +582,42 @@ class ChangelogGeneratorTests {
 		assertChangelog("23").hasContent(from("output-with-no-prs"));
 	}
 
+	@Test
+	void generateWhenIncludeClosingCommitAuthorsAndNoContributorFoundLogsWarning(CapturedOutput output)
+			throws Exception {
+		User communityUser = createUser("community-member");
+		List<Issue> issues = new ArrayList<>();
+		issues.add(newIssue("Enhancement 1", "2", "enhancement-1-url", Type.ENHANCEMENT, communityUser));
+		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
+		given(this.service.getEventsForIssue(2, REPO)).willReturn(Collections.emptyList());
+
+		ApplicationProperties properties = new ApplicationProperties(REPO, MilestoneReference.ID, null, null,
+				new Contributors(null, null, true), null, false);
+		this.generator = new ChangelogGenerator(this.service, properties);
+		generateChangelog("23");
+		assertThat(output).contains("WARN").contains("No contributor found for issue #2: enhancement-1-url");
+	}
+
+	@Test
+	void generateWhenIncludeClosingCommitAuthorsAndNoContributorFoundForExcludedUserDoesNotLogWarning(
+			CapturedOutput output) throws Exception {
+		User excludedUser = createUser("coremember");
+		User botUser = createUser("dependabot[bot]");
+		List<Issue> issues = new ArrayList<>();
+		issues.add(newIssue("Enhancement 1", "2", "enhancement-1-url", Type.ENHANCEMENT, excludedUser));
+		issues.add(newIssue("Enhancement 2", "4", "enhancement-2-url", Type.ENHANCEMENT, botUser));
+		given(this.service.getIssuesForMilestone(23, REPO)).willReturn(issues);
+		given(this.service.getEventsForIssue(2, REPO)).willReturn(Collections.emptyList());
+		given(this.service.getEventsForIssue(4, REPO)).willReturn(Collections.emptyList());
+
+		ApplicationProperties properties = new ApplicationProperties(REPO, MilestoneReference.ID, null, null,
+				new Contributors(null, new ContributorsExclude(Collections.singleton("coremember")), true), null,
+				false);
+		this.generator = new ChangelogGenerator(this.service, properties);
+		generateChangelog("23");
+		assertThat(output).doesNotContain("No contributor found for issue #");
+	}
+
 	private void setupGenerator(MilestoneReference id) {
 		Set<String> labels = new HashSet<>(Arrays.asList("duplicate", "wontfix"));
 		PortedIssue forwardPort = new PortedIssue("status: forward-port", "Forward port of issue #(\\d+)");
@@ -609,6 +649,10 @@ class ChangelogGeneratorTests {
 
 	private Issue newIssue(String title, String number, String url, Type type) {
 		return new Issue(number, title, null, type.getLabels(), url, null, null, AuthorAssociation.NONE);
+	}
+
+	private Issue newIssue(String title, String number, String url, Type type, User user) {
+		return new Issue(number, title, user, type.getLabels(), url, null, null, AuthorAssociation.NONE);
 	}
 
 	private Issue newIssue(String title, String number, String url, String body, Type type) {
