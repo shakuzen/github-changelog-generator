@@ -23,19 +23,30 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
+import org.springframework.util.StringUtils;
 
 import io.spring.githubchangeloggenerator.ApplicationProperties.ExternalLink;
 import io.spring.githubchangeloggenerator.ApplicationProperties.IssueSort;
+import io.spring.githubchangeloggenerator.github.payload.Commit;
+import io.spring.githubchangeloggenerator.github.payload.Commit.GitCommit;
 import io.spring.githubchangeloggenerator.github.payload.Issue;
 import io.spring.githubchangeloggenerator.github.payload.Label;
+import io.spring.githubchangeloggenerator.github.payload.PullRequest;
+import io.spring.githubchangeloggenerator.github.payload.TimelineEvent;
+import io.spring.githubchangeloggenerator.github.payload.TimelineEvent.Source;
+import io.spring.githubchangeloggenerator.github.payload.TimelineEvent.SourceIssue;
+import io.spring.githubchangeloggenerator.github.payload.TimelineEvent.SourceRepository;
 import io.spring.githubchangeloggenerator.github.payload.User;
 import io.spring.githubchangeloggenerator.github.service.GitHubService;
 import io.spring.githubchangeloggenerator.github.service.Repository;
@@ -47,12 +58,16 @@ import io.spring.githubchangeloggenerator.github.service.Repository;
  * @author Madhura Bhave
  * @author Phillip Webb
  * @author Mahendra Bishnoi
+ * @author Tommy Ludwig
  */
 @Component
 public class ChangelogGenerator {
 
 	private static final Comparator<Issue> TITLE_COMPARATOR = Comparator.comparing(Issue::getTitle,
 			String.CASE_INSENSITIVE_ORDER);
+
+	private static final Pattern CO_AUTHORED_BY_PATTERN = Pattern
+		.compile("(?im)^co-authored-by:\\s*.*?<(?:\\d+\\+)?([^@>]+)@users\\.noreply\\.github\\.com>");
 
 	private static final List<Escape> escapes = Arrays.asList(gitHubUserMentions(), htmlTags(), markdownStyling());
 
@@ -70,6 +85,8 @@ public class ChangelogGenerator {
 
 	private final String contributorsTitle;
 
+	private final boolean includeClosingContributors;
+
 	private final ChangelogSections sections;
 
 	private final List<ExternalLink> externalLinks;
@@ -86,6 +103,7 @@ public class ChangelogGenerator {
 		this.excludeLabels = properties.getIssues().getExcludes().getLabels();
 		this.excludeContributors = properties.getContributors().getExclude().getNames();
 		this.contributorsTitle = properties.getContributors().getTitle();
+		this.includeClosingContributors = properties.getContributors().isIncludeClosingContributors();
 		this.externalLinks = properties.getExternalLinks();
 		this.generateLinks = properties.getIssues().isGenerateLinks();
 		this.issueChain = new PortedIssueChain(properties.getIssues().getPorts(), this.service, this.repository);
@@ -175,10 +193,83 @@ public class ChangelogGenerator {
 		}
 		return issues.stream()
 			.map(this::getPortedReferenceIssue)
-			.filter((issue) -> issue.getPullRequest() != null)
-			.map(Issue::getUser)
+			.flatMap(this::getContributorsForIssue)
 			.filter(this::isIncludedContributor)
 			.collect(Collectors.toSet());
+	}
+
+	private Stream<User> getContributorsForIssue(Issue issue) {
+		if (issue.getPullRequest() != null) {
+			return Stream.of(issue.getUser());
+		}
+		if (this.includeClosingContributors) {
+			return getClosingContributors(issue).stream();
+		}
+		return Stream.empty();
+	}
+
+	private Set<User> getClosingContributors(Issue issue) {
+		List<TimelineEvent> timeline = this.service.getTimelineForIssue(Integer.parseInt(issue.getNumber()),
+				this.repository);
+		Set<User> contributors = new HashSet<>();
+		String commitId = getClosingCommitId(timeline);
+		if (commitId != null) {
+			Commit commit = this.service.getCommit(commitId, this.repository);
+			if (commit != null) {
+				if (commit.getAuthor() != null) {
+					contributors.add(commit.getAuthor());
+				}
+				contributors.addAll(getCoAuthors(commit));
+			}
+		}
+		contributors.addAll(getClosingPullRequestAuthors(timeline));
+		return contributors;
+	}
+
+	private String getClosingCommitId(List<TimelineEvent> timeline) {
+		for (int i = timeline.size() - 1; i >= 0; i--) {
+			TimelineEvent event = timeline.get(i);
+			if ("closed".equals(event.getEvent()) && StringUtils.hasText(event.getCommitId())) {
+				return event.getCommitId();
+			}
+		}
+		return null;
+	}
+
+	private Set<User> getClosingPullRequestAuthors(List<TimelineEvent> timeline) {
+		Set<User> authors = new HashSet<>();
+		for (TimelineEvent event : timeline) {
+			if ("cross-referenced".equals(event.getEvent())) {
+				Source source = event.getSource();
+				if (source != null && source.getIssue() != null) {
+					SourceIssue sourceIssue = source.getIssue();
+					PullRequest pullRequest = sourceIssue.getPullRequest();
+					SourceRepository sourceRepository = sourceIssue.getRepository();
+					if (pullRequest != null && pullRequest.isMerged() && isMatchingRepository(sourceRepository)
+							&& sourceIssue.getUser() != null) {
+						authors.add(sourceIssue.getUser());
+					}
+				}
+			}
+		}
+		return authors;
+	}
+
+	private boolean isMatchingRepository(SourceRepository sourceRepository) {
+		return sourceRepository != null && sourceRepository.matches(this.repository);
+	}
+
+	private Set<User> getCoAuthors(Commit commit) {
+		GitCommit gitCommit = commit.getGitCommit();
+		if (gitCommit == null || !StringUtils.hasText(gitCommit.getMessage())) {
+			return Collections.emptySet();
+		}
+		Set<User> coAuthors = new HashSet<>();
+		Matcher matcher = CO_AUTHORED_BY_PATTERN.matcher(gitCommit.getMessage());
+		while (matcher.find()) {
+			coAuthors.add(new User(matcher.group(1)));
+		}
+		return coAuthors;
 	}
 
 	private Issue getPortedReferenceIssue(Issue issue) {

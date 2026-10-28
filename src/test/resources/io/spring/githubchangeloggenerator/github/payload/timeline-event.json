@@ -1,0 +1,21 @@
+{
+  "event": "cross-referenced",
+  "commit_id": null,
+  "source": {
+    "issue": {
+      "user": {
+        "login": "octocat"
+      },
+      "pull_request": {
+        "url": "https://api.github.com/repos/org/repo/pulls/1",
+        "merged_at": "2026-09-01T18:19:33Z"
+      },
+      "repository": {
+        "name": "repo",
+        "owner": {
+          "login": "org"
+        }
+      }
+    }
+  }
+}

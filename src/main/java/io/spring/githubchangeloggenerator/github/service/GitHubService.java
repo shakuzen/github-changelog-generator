@@ -34,14 +34,17 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import io.spring.githubchangeloggenerator.github.payload.Comment;
+import io.spring.githubchangeloggenerator.github.payload.Commit;
 import io.spring.githubchangeloggenerator.github.payload.Issue;
 import io.spring.githubchangeloggenerator.github.payload.Milestone;
+import io.spring.githubchangeloggenerator.github.payload.TimelineEvent;
 
 /**
  * Central class for interacting with GitHub's REST API.
  *
  * @author Madhura Bhave
  * @author Phillip Webb
+ * @author Tommy Ludwig
  */
 @Component
 public class GitHubService {
@@ -53,6 +56,10 @@ public class GitHubService {
 	private static final String ISSUES_URI = "/repos/{owner}/{name}/issues?milestone={milestone}&state=closed";
 
 	private static final String ISSUE_URI = "/repos/{owner}/{name}/issues/{issueNumber}";
+
+	private static final String TIMELINE_URI = "/repos/{owner}/{name}/issues/{issueNumber}/timeline";
+
+	private static final String COMMIT_URI = "/repos/{owner}/{name}/commits/{commitSha}";
 
 	private static final String COMMENTS_URI = "/repos/{owner}/{name}/issues/{issueNumber}/comments";
 
@@ -95,6 +102,20 @@ public class GitHubService {
 
 	public List<Comment> getCommentsForIssue(int issueNumber, Repository repository) {
 		return getAll(Comment.class, COMMENTS_URI, repository.getOwner(), repository.getName(), issueNumber);
+	}
+
+	public List<TimelineEvent> getTimelineForIssue(int issueNumber, Repository repository) {
+		return getAll(TimelineEvent.class, TIMELINE_URI, repository.getOwner(), repository.getName(), issueNumber);
+	}
+
+	public Commit getCommit(String commitSha, Repository repository) {
+		try {
+			return this.restTemplate.getForObject(COMMIT_URI, Commit.class, repository.getOwner(), repository.getName(),
+					commitSha);
+		}
+		catch (RestClientException clientException) {
+			return null;
+		}
 	}
 
 	private <T> List<T> getAll(Class<T> type, String url, Object... uriVariables) {

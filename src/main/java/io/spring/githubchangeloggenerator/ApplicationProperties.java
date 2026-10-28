@@ -36,6 +36,7 @@ import io.spring.githubchangeloggenerator.github.service.Repository;
  * @author Mahendra Bishnoi
  * @author Gary Russell
  * @author Steven Sheehy
+ * @author Tommy Ludwig
  */
 @ConfigurationProperties(prefix = "changelog")
 public class ApplicationProperties {
@@ -83,7 +84,7 @@ public class ApplicationProperties {
 		this.milestoneReference = milestoneReference;
 		this.sections = (sections != null) ? sections : Collections.emptyList();
 		this.issues = (issues != null) ? issues : new Issues(null, null, null, true);
-		this.contributors = (contributors != null) ? contributors : new Contributors(null, null);
+		this.contributors = (contributors != null) ? contributors : new Contributors(null, null, false);
 		this.externalLinks = (externalLinks != null) ? externalLinks : Collections.emptyList();
 		this.addSections = addSections;
 	}
@@ -288,7 +289,7 @@ public class ApplicationProperties {
 	}
 
 	/**
-	 * Properties relating to constructors.
+	 * Properties relating to contributors.
 	 */
 	public static class Contributors {
 
@@ -302,9 +303,17 @@ public class ApplicationProperties {
 		 */
 		private final ContributorsExclude exclude;
 
-		public Contributors(String title, ContributorsExclude exclude) {
+		/**
+		 * Whether to include contributors from commits and pull requests that closed
+		 * issues.
+		 */
+		private final boolean includeClosingContributors;
+
+		public Contributors(String title, ContributorsExclude exclude,
+				@DefaultValue("false") boolean includeClosingContributors) {
 			this.title = title;
 			this.exclude = (exclude != null) ? exclude : new ContributorsExclude(null);
+			this.includeClosingContributors = includeClosingContributors;
 		}
 
 		public String getTitle() {
@@ -313,6 +322,10 @@ public class ApplicationProperties {
 
 		public ContributorsExclude getExclude() {
 			return this.exclude;
+		}
+
+		public boolean isIncludeClosingContributors() {
+			return this.includeClosingContributors;
 		}
 
 	}

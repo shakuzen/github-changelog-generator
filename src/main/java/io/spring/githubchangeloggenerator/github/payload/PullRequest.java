@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2020 the original author or authors.
+ * Copyright 2018-2026 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,41 @@
 
 package io.spring.githubchangeloggenerator.github.payload;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * Represents a Github Pull Request.
  *
  * @author Madhura Bhave
+ * @author Tommy Ludwig
  */
 public class PullRequest {
 
 	private final String url;
 
-	public PullRequest(@JsonProperty("url") String url) {
+	private final String mergedAt;
+
+	@JsonCreator
+	public PullRequest(@JsonProperty("url") String url, @JsonProperty("merged_at") String mergedAt) {
 		this.url = url;
+		this.mergedAt = mergedAt;
+	}
+
+	public PullRequest(String url) {
+		this(url, null);
 	}
 
 	public String getUrl() {
 		return this.url;
+	}
+
+	public String getMergedAt() {
+		return this.mergedAt;
+	}
+
+	public boolean isMerged() {
+		return this.mergedAt != null;
 	}
 
 }

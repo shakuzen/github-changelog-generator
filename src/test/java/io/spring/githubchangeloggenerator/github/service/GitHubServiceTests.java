@@ -33,7 +33,9 @@ import org.springframework.test.web.client.ResponseActions;
 import org.springframework.test.web.client.response.DefaultResponseCreator;
 
 import io.spring.githubchangeloggenerator.github.payload.Comment;
+import io.spring.githubchangeloggenerator.github.payload.Commit;
 import io.spring.githubchangeloggenerator.github.payload.Issue;
+import io.spring.githubchangeloggenerator.github.payload.TimelineEvent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -47,6 +49,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  * Tests for {@link GitHubService}.
  *
  * @author Madhura Bhave
+ * @author Tommy Ludwig
  */
 @RestClientTest(GitHubService.class)
 class GitHubServiceTests {
@@ -56,6 +59,8 @@ class GitHubServiceTests {
 	private static final String ISSUES_URL = "/repos/org/repo/issues?milestone=";
 
 	private static final String ISSUE_URL = "/repos/org/repo/issues";
+
+	private static final String COMMITS_URL = "/repos/org/repo/commits";
 
 	@Autowired
 	private MockRestServiceServer server;
@@ -139,6 +144,35 @@ class GitHubServiceTests {
 		expectGet("/page-two%3D").andRespond(withJsonFrom("comments-for-issue-page-2.json"));
 		List<Comment> comments = this.service.getCommentsForIssue(23, Repository.of("org/repo"));
 		assertThat(comments.size()).isEqualTo(60);
+	}
+
+	@Test
+	void getTimelineForIssue() {
+		expectGet(ISSUE_URL + "/23/timeline").andRespond(withJsonFrom("timeline-for-issue.json"));
+		List<TimelineEvent> events = this.service.getTimelineForIssue(23, Repository.of("org/repo"));
+		assertThat(events.size()).isEqualTo(3);
+		assertThat(events.get(1).getEvent()).isEqualTo("closed");
+		assertThat(events.get(1).getCommitId()).isEqualTo("118e873ab332a113448a87ff08e9743588080de1");
+		assertThat(events.get(2).getEvent()).isEqualTo("cross-referenced");
+		assertThat(events.get(2).getSource().getIssue().getUser().getName()).isEqualTo("octocat");
+		assertThat(events.get(2).getSource().getIssue().getPullRequest().isMerged()).isTrue();
+		assertThat(events.get(2).getSource().getIssue().getRepository().matches(Repository.of("org/repo"))).isTrue();
+	}
+
+	@Test
+	void getCommit() {
+		expectGet(COMMITS_URL + "/118e873ab332a113448a87ff08e9743588080de1").andRespond(withJsonFrom("commit.json"));
+		Commit commit = this.service.getCommit("118e873ab332a113448a87ff08e9743588080de1", Repository.of("org/repo"));
+		assertThat(commit).isNotNull();
+		assertThat(commit.getAuthor().getName()).isEqualTo("octocat");
+	}
+
+	@Test
+	void getCommitWhenCommitDoesNotExist() {
+		expectGet(COMMITS_URL + "/118e873ab332a113448a87ff08e9743588080de1")
+			.andRespond(withStatus(HttpStatus.NOT_FOUND));
+		Commit commit = this.service.getCommit("118e873ab332a113448a87ff08e9743588080de1", Repository.of("org/repo"));
+		assertThat(commit).isNull();
 	}
 
 	private ResponseActions expectGet(String expectedUri) {
